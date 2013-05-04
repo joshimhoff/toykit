@@ -11,9 +11,9 @@
 #include <linux/string.h>
 
 // TODO 
-// Hide ports and add remote backdoor
-// Hide self from lsmod and other commands
-// Cite sources and document
+// Hide ports
+// Hide from lsmod
+// Cite sources
 // Write report
 
 // for local backdoor
