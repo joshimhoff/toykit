@@ -12,9 +12,10 @@
 
 // TODO 
 // Hide ports
-// Hide from lsmod
 // Cite sources
 // Write report
+// Bug fix in getdents
+// Better proc hiding
 
 // for local backdoor
 #define LOCAL_PID 12345
