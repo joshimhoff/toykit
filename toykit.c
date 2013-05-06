@@ -224,8 +224,9 @@ int getPathnameFromFD(int fd, char *pathname)
 	struct files_struct *files = NULL;
 	struct path path;
 	
-	files = get_files_struct(current);
-	put_task_struct(current);
+	//files = get_files_struct(current);
+	//put_task_struct(current);
+	files = current->files;
 
 	spin_lock(&files->file_lock);
 	file = fcheck_files(files, fd);
@@ -252,8 +253,6 @@ int getPathnameFromFD(int fd, char *pathname)
 	    free_page((unsigned long)tmp);
 	    return PTR_ERR(pathname);
 	}
-
-	/* do something here with pathname */
 
 	free_page((unsigned long)tmp);
 	return 0;
