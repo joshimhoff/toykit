@@ -14,3 +14,4 @@ Commands that have to be set before module load time:
 
 ##Stealth Mode 
 Rootkit is invisible and unremovable.
+Comment out STEALTH MODE to turn off.
